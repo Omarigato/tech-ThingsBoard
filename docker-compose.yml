@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: tb-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-thingsboard}
+      POSTGRES_USER: ${POSTGRES_USER:-thingsboard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-thingsboard_secure_password_2026}
+    volumes:
+      - tb-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-thingsboard} -d ${POSTGRES_DB:-thingsboard}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - tb-network
+
+  thingsboard:
+    image: ${TB_IMAGE:-dockerhub.timeweb.cloud/thingsboard/tb-postgres:3.7.0}
+    container_name: thingsboard-ce
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${TB_HTTP_PORT:-9090}:9090"
+      - "${TB_MQTT_PORT:-1883}:1883"
+      - "${TB_COAP_PORT:-5683}:5683/udp"
+    environment:
+      TB_QUEUE_TYPE: in-memory
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-thingsboard}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-thingsboard}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-thingsboard_secure_password_2026}
+      JAVA_OPTS: "-Xms512M -Xmx2048M"
+    volumes:
+      - tb-data:/data
+      - tb-logs:/var/log/thingsboard
+    networks:
+      - tb-network
+
+  hvac-simulator:
+    build:
+      context: ./hvac-simulator
+      dockerfile: Dockerfile
+    container_name: hvac-simulator
+    restart: unless-stopped
+    depends_on:
+      - thingsboard
+    environment:
+      TB_MQTT_HOST: thingsboard
+      TB_MQTT_PORT: 1883
+      TB_DEVICE_TOKEN: ${HVAC_DEVICE_TOKEN:-HVAC_VENT_SECRET_TOKEN}
+      SIMULATION_MODE: ${SIMULATION_MODE:-NORMAL}
+      SIMULATION_INTERVAL: ${SIMULATION_INTERVAL:-5.0}
+      FILTER_SPEED: ${FILTER_SPEED:-0.015}
+      HTTP_PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - tb-network
+
+volumes:
+  tb-postgres-data:
+    name: tb-postgres-data
+  tb-data:
+    name: tb-data
+  tb-logs:
+    name: tb-logs
+
+networks:
+  tb-network:
+    name: tb-network
+    driver: bridge

@@ -1,0 +1,4 @@
+# Core Dependencies for HVAC Simulator
+paho-mqtt>=2.0.0,<3.0.0
+pydantic>=2.5.0,<3.0.0
+pydantic-settings>=2.2.0,<3.0.0

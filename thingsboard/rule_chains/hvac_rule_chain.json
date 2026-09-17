@@ -1,0 +1,260 @@
+{
+  "ruleChain": {
+    "name": "HVAC-01: Мониторинг и аварии (ПВУ)",
+    "type": "CORE",
+    "firstRuleNodeId": null,
+    "root": false,
+    "debugMode": false,
+    "additionalInfo": {
+      "description": "Автоматическая генерация и снятие аварийных событий для приточно-вытяжной вентиляции (ПВУ)"
+    }
+  },
+  "metadata": {
+    "firstNodeIndex": 0,
+    "nodes": [
+      {
+        "type": "org.thingsboard.rule.engine.telemetry.TbMsgTimeseriesNode",
+        "name": "Сохранить телеметрию",
+        "debugMode": false,
+        "configuration": {
+          "defaultTTL": 0
+        },
+        "additionalInfo": {
+          "layoutX": 220,
+          "layoutY": 150
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.filter.TbJsFilterNode",
+        "name": "Фильтр F7: Проверка перепада (> 250 Па)",
+        "debugMode": false,
+        "configuration": {
+          "jsScript": "return typeof msg.filter_pressure !== 'undefined' && msg.filter_pressure > 250;"
+        },
+        "additionalInfo": {
+          "layoutX": 480,
+          "layoutY": 80
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.action.TbCreateAlarmNode",
+        "name": "Авария: Засорение фильтра F7",
+        "debugMode": false,
+        "configuration": {
+          "alarmType": "FILTER_DIRTY",
+          "alarmDetailsBuildJs": "return { filter_pressure: msg.filter_pressure, filter_dirty_percent: msg.filter_dirty_percent, threshold: 250, unit: 'Pa' };",
+          "severity": "WARNING",
+          "propagate": true,
+          "propagateToOwner": false,
+          "propagateToTenant": false,
+          "useMessageAlarmData": false,
+          "overwriteAlarmDetails": true
+        },
+        "additionalInfo": {
+          "layoutX": 780,
+          "layoutY": 80
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.filter.TbJsFilterNode",
+        "name": "Фильтр F7: Проверка нормы (<= 200 Па)",
+        "debugMode": false,
+        "configuration": {
+          "jsScript": "return typeof msg.filter_pressure !== 'undefined' && msg.filter_pressure <= 200;"
+        },
+        "additionalInfo": {
+          "layoutX": 480,
+          "layoutY": 150
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.action.TbClearAlarmNode",
+        "name": "Снятие аварии: Засорение фильтра F7",
+        "debugMode": false,
+        "configuration": {
+          "alarmType": "FILTER_DIRTY",
+          "alarmDetailsBuildJs": "return { cleared_at_pressure: msg.filter_pressure };"
+        },
+        "additionalInfo": {
+          "layoutX": 780,
+          "layoutY": 150
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.filter.TbJsFilterNode",
+        "name": "Температура: Проверка отклонения (> 5 °C)",
+        "debugMode": false,
+        "configuration": {
+          "jsScript": "return typeof msg.supply_temperature !== 'undefined' && typeof msg.target_temperature !== 'undefined' && Math.abs(msg.supply_temperature - msg.target_temperature) > 5.0 && msg.supply_fan_rpm > 200;"
+        },
+        "additionalInfo": {
+          "layoutX": 480,
+          "layoutY": 240
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.action.TbCreateAlarmNode",
+        "name": "Авария: Отклонение температуры",
+        "debugMode": false,
+        "configuration": {
+          "alarmType": "TEMPERATURE_DEVIATION",
+          "alarmDetailsBuildJs": "return { supply_temp: msg.supply_temperature, target_temp: msg.target_temperature, delta: Math.abs(msg.supply_temperature - msg.target_temperature) };",
+          "severity": "MAJOR",
+          "propagate": true,
+          "propagateToOwner": false,
+          "propagateToTenant": false,
+          "useMessageAlarmData": false,
+          "overwriteAlarmDetails": true
+        },
+        "additionalInfo": {
+          "layoutX": 780,
+          "layoutY": 240
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.filter.TbJsFilterNode",
+        "name": "Температура: Проверка нормы (<= 2.5 °C)",
+        "debugMode": false,
+        "configuration": {
+          "jsScript": "return typeof msg.supply_temperature !== 'undefined' && typeof msg.target_temperature !== 'undefined' && Math.abs(msg.supply_temperature - msg.target_temperature) <= 2.5;"
+        },
+        "additionalInfo": {
+          "layoutX": 480,
+          "layoutY": 310
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.action.TbClearAlarmNode",
+        "name": "Снятие аварии: Отклонение температуры",
+        "debugMode": false,
+        "configuration": {
+          "alarmType": "TEMPERATURE_DEVIATION",
+          "alarmDetailsBuildJs": "return { recovered_supply_temp: msg.supply_temperature, target_temp: msg.target_temperature };"
+        },
+        "additionalInfo": {
+          "layoutX": 780,
+          "layoutY": 310
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.filter.TbJsFilterNode",
+        "name": "Оборудование: Проверка отказа / останова",
+        "debugMode": false,
+        "configuration": {
+          "jsScript": "return msg.status === 'STOPPED' || (msg.status === 'ALARM' && msg.supply_fan_rpm < 100);"
+        },
+        "additionalInfo": {
+          "layoutX": 480,
+          "layoutY": 400
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.action.TbCreateAlarmNode",
+        "name": "Авария: Отказ вентилятора / двигателя",
+        "debugMode": false,
+        "configuration": {
+          "alarmType": "DEVICE_FAILURE",
+          "alarmDetailsBuildJs": "return { status: msg.status, fan_rpm: msg.supply_fan_rpm, reason: 'Unexpected shutdown or motor stall' };",
+          "severity": "CRITICAL",
+          "propagate": true,
+          "propagateToOwner": false,
+          "propagateToTenant": false,
+          "useMessageAlarmData": false,
+          "overwriteAlarmDetails": true
+        },
+        "additionalInfo": {
+          "layoutX": 780,
+          "layoutY": 400
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.filter.TbJsFilterNode",
+        "name": "Оборудование: Проверка восстановления работы",
+        "debugMode": false,
+        "configuration": {
+          "jsScript": "return msg.status === 'RUNNING' && msg.supply_fan_rpm > 400;"
+        },
+        "additionalInfo": {
+          "layoutX": 480,
+          "layoutY": 470
+        }
+      },
+      {
+        "type": "org.thingsboard.rule.engine.action.TbClearAlarmNode",
+        "name": "Снятие аварии: Восстановление работы",
+        "debugMode": false,
+        "configuration": {
+          "alarmType": "DEVICE_FAILURE",
+          "alarmDetailsBuildJs": "return { status: msg.status, rpm: msg.supply_fan_rpm, message: 'Device recovered to running state' };"
+        },
+        "additionalInfo": {
+          "layoutX": 780,
+          "layoutY": 470
+        }
+      }
+    ],
+    "connections": [
+      {
+        "fromIndex": 0,
+        "toIndex": 1,
+        "type": "Success"
+      },
+      {
+        "fromIndex": 1,
+        "toIndex": 2,
+        "type": "True"
+      },
+      {
+        "fromIndex": 0,
+        "toIndex": 3,
+        "type": "Success"
+      },
+      {
+        "fromIndex": 3,
+        "toIndex": 4,
+        "type": "True"
+      },
+      {
+        "fromIndex": 0,
+        "toIndex": 5,
+        "type": "Success"
+      },
+      {
+        "fromIndex": 5,
+        "toIndex": 6,
+        "type": "True"
+      },
+      {
+        "fromIndex": 0,
+        "toIndex": 7,
+        "type": "Success"
+      },
+      {
+        "fromIndex": 7,
+        "toIndex": 8,
+        "type": "True"
+      },
+      {
+        "fromIndex": 0,
+        "toIndex": 9,
+        "type": "Success"
+      },
+      {
+        "fromIndex": 9,
+        "toIndex": 10,
+        "type": "True"
+      },
+      {
+        "fromIndex": 0,
+        "toIndex": 11,
+        "type": "Success"
+      },
+      {
+        "fromIndex": 11,
+        "toIndex": 12,
+        "type": "True"
+      }
+    ],
+    "ruleChainConnections": null
+  }
+}
