@@ -1,5 +1,3 @@
-"""Enums and state representations for HVAC physical components."""
-
 from enum import Enum
 
 

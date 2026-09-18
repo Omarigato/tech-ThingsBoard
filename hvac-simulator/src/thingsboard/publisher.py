@@ -39,7 +39,8 @@ class TelemetryPublisher:
             f"T_sup={telemetry.supply_temperature:5.1f} C (T_tgt={telemetry.target_temperature:4.1f} C, T_out={telemetry.outdoor_temperature:5.1f} C) | "
             f"Fans={telemetry.supply_fan_rpm:4d}/{telemetry.exhaust_fan_rpm:4d} RPM | "
             f"Filter={telemetry.filter_pressure:5.1f} Pa ({telemetry.filter_dirty_percent:4.1f}%) | "
-            f"Valves(H/C)={telemetry.heating_valve:4.1f}%/{telemetry.cooling_valve:4.1f}%"
+            f"P={telemetry.instant_power_kw:4.2f}kW (COP={telemetry.cop_efficiency:3.1f}) | "
+            f"Health={telemetry.health_index:4.1f}% (RUL={telemetry.filter_rul_hours:4.1f}h)"
         )
 
         return telemetry

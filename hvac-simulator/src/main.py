@@ -4,7 +4,7 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 current_dir = Path(__file__).resolve().parent
 hvac_root = current_dir.parent
@@ -80,7 +80,34 @@ class HVACApplication:
             publisher=self.publisher
         )
 
+        self.mqtt_client.register_rpc_handler(self._handle_rpc)
         self._setup_signals()
+
+    def _handle_rpc(self, request_id: str, method: str, params: Any) -> Dict[str, Any]:
+        logging.info(f"Executing RPC method '{method}' with params: {params}")
+        if method == "setTargetTemperature":
+            target = float(params)
+            self.controller.set_target_temperature(target)
+            return {"success": True, "target_temperature": self.controller.target_temperature}
+        elif method in ("setPower", "setState"):
+            is_on = params is True or str(params).lower() in ("true", "1", "on", "start")
+            if is_on:
+                self.controller.start()
+            else:
+                self.controller.stop()
+            return {"success": True, "status": self.controller.status.value}
+        elif method == "resetFilter":
+            self.controller.reset_filter()
+            return {"success": True, "filter_pressure": self.controller.filter.current_pressure}
+        elif method == "setMode":
+            mode_str = str(params).upper()
+            try:
+                target_mode = OperatingMode(mode_str)
+                self.controller.set_mode(target_mode)
+                return {"success": True, "mode": self.controller.mode.value}
+            except ValueError:
+                return {"success": False, "error": f"Invalid mode: {mode_str}"}
+        return {"success": False, "error": f"Unsupported method: {method}"}
 
     def _setup_signals(self) -> None:
         signal.signal(signal.SIGINT, self._handle_signal)

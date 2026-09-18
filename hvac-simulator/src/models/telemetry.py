@@ -1,5 +1,3 @@
-"""Telemetry data transfer object for ThingsBoard MQTT payload."""
-
 import time
 from typing import Any, Dict
 from dataclasses import dataclass, asdict
@@ -8,29 +6,31 @@ from .state import DeviceStatus
 
 @dataclass(frozen=True)
 class HVACTelemetry:
-    """Represents a discrete telemetry sample from the HVAC unit."""
-    timestamp: int  # Milliseconds since epoch
-    supply_temperature: float  # Celsius, supply air
-    outdoor_temperature: float  # Celsius, outdoor ambient
-    target_temperature: float  # Celsius, setpoint
-    humidity: float  # Relative humidity % (0-100)
-    supply_fan_rpm: int  # Supply fan speed (RPM)
-    exhaust_fan_rpm: int  # Exhaust fan speed (RPM)
-    filter_pressure: float  # Differential pressure over filter (Pa)
-    filter_dirty_percent: float  # Filter particulate accumulation (0-100%)
-    damper_position: float  # Air intake damper opening % (0-100)
-    heating_valve: float  # Hot water coil valve opening % (0-100)
-    cooling_valve: float  # Chilled water coil valve opening % (0-100)
-    status: DeviceStatus  # RUNNING | STOPPED | ALARM
+    timestamp: int
+    supply_temperature: float
+    outdoor_temperature: float
+    target_temperature: float
+    humidity: float
+    supply_fan_rpm: int
+    exhaust_fan_rpm: int
+    filter_pressure: float
+    filter_dirty_percent: float
+    damper_position: float
+    heating_valve: float
+    cooling_valve: float
+    status: DeviceStatus
+    instant_power_kw: float
+    total_energy_kwh: float
+    cop_efficiency: float
+    filter_rul_hours: float
+    health_index: float
+    bearing_vibration: float
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert telemetry to ThingsBoard-compatible JSON dict."""
         data = asdict(self)
-        # Ensure status is serialized as its string value
         data["status"] = self.status.value
         return data
 
     @classmethod
     def current_timestamp_ms(cls) -> int:
-        """Returns current epoch time in milliseconds."""
         return int(time.time() * 1000)

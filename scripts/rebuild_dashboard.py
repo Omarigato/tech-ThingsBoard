@@ -43,7 +43,13 @@ w_table["config"]["datasources"] = [{
         {"name": "filter_dirty_percent", "type": "timeseries", "label": "Засорение фильтра (%)", "color": "#f59e0b", "units": "%", "decimals": 1, "settings": default_key_settings},
         {"name": "damper_position", "type": "timeseries", "label": "Заслонка (%)", "color": "#3b82f6", "units": "%", "decimals": 0, "settings": default_key_settings},
         {"name": "heating_valve", "type": "timeseries", "label": "Клапан нагревателя (%)", "color": "#ef4444", "units": "%", "decimals": 0, "settings": default_key_settings},
-        {"name": "cooling_valve", "type": "timeseries", "label": "Клапан охладителя (%)", "color": "#0284c7", "units": "%", "decimals": 0, "settings": default_key_settings}
+        {"name": "cooling_valve", "type": "timeseries", "label": "Клапан охладителя (%)", "color": "#0284c7", "units": "%", "decimals": 0, "settings": default_key_settings},
+        {"name": "instant_power_kw", "type": "timeseries", "label": "Мощность P (кВт)", "color": "#fbbf24", "units": "кВт", "decimals": 2, "settings": default_key_settings},
+        {"name": "total_energy_kwh", "type": "timeseries", "label": "Расход (кВт·ч)", "color": "#a855f7", "units": "кВт·ч", "decimals": 2, "settings": default_key_settings},
+        {"name": "cop_efficiency", "type": "timeseries", "label": "COP к.п.д.", "color": "#34d399", "decimals": 2, "settings": default_key_settings},
+        {"name": "health_index", "type": "timeseries", "label": "Индекс здоровья (%)", "color": "#10b981", "units": "%", "decimals": 1, "settings": default_key_settings},
+        {"name": "filter_rul_hours", "type": "timeseries", "label": "Ресурс RUL (ч)", "color": "#38bdf8", "units": "ч", "decimals": 1, "settings": default_key_settings},
+        {"name": "bearing_vibration", "type": "timeseries", "label": "Вибрация (мм/с)", "color": "#f87171", "units": "мм/с", "decimals": 2, "settings": default_key_settings}
     ]
 }]
 
@@ -92,6 +98,21 @@ w_chart_fans["config"]["datasources"] = [{
     ]
 }]
 
+w_chart_energy = json.loads(json.dumps(base_chart_widget))
+w_chart_energy["id"] = "w_chart_energy"
+w_chart_energy["config"]["title"] = "Энергоэффективность и прогноз технического состояния"
+w_chart_energy["config"]["settings"]["thresholds"] = []
+w_chart_energy["config"]["datasources"] = [{
+    "type": "entity",
+    "name": "HVAC-01",
+    "entityAliasId": ALIAS_ID,
+    "dataKeys": [
+        {"name": "instant_power_kw", "type": "timeseries", "label": "Мощность P (кВт)", "color": "#fbbf24", "units": "кВт", "decimals": 2, "settings": {"yAxisId": "default", "showInLegend": True, "type": "line", "lineSettings": {"showLine": True, "smooth": True, "lineWidth": 2.0}}},
+        {"name": "cop_efficiency", "type": "timeseries", "label": "COP к.п.д.", "color": "#34d399", "decimals": 2, "settings": {"yAxisId": "default", "showInLegend": True, "type": "line", "lineSettings": {"showLine": True, "smooth": True, "lineWidth": 2.0}}},
+        {"name": "health_index", "type": "timeseries", "label": "Индекс здоровья (%)", "color": "#10b981", "units": "%", "decimals": 1, "settings": {"yAxisId": "default", "showInLegend": True, "type": "line", "lineSettings": {"showLine": True, "smooth": True, "lineWidth": 2.0}}}
+    ]
+}]
+
 w_alarms = json.loads(json.dumps(base_alarm_widget))
 w_alarms["id"] = "w_alarms_table"
 w_alarms["config"]["title"] = "Журнал аварийных событий (ThingsBoard Rule Engine)"
@@ -123,6 +144,7 @@ new_dashboard = {
             "w_chart_temps": w_chart_temps,
             "w_chart_filter": w_chart_filter,
             "w_chart_fans": w_chart_fans,
+            "w_chart_energy": w_chart_energy,
             "w_alarms_table": w_alarms
         },
         "states": {
@@ -132,11 +154,12 @@ new_dashboard = {
                 "layouts": {
                     "main": {
                         "widgets": {
-                            "w_telemetry_table": {"sizeX": 24, "sizeY": 7, "row": 0, "col": 0},
-                            "w_chart_temps": {"sizeX": 12, "sizeY": 8, "row": 7, "col": 0},
-                            "w_chart_filter": {"sizeX": 12, "sizeY": 8, "row": 7, "col": 12},
-                            "w_chart_fans": {"sizeX": 12, "sizeY": 8, "row": 15, "col": 0},
-                            "w_alarms_table": {"sizeX": 12, "sizeY": 8, "row": 15, "col": 12}
+                            "w_telemetry_table": {"sizeX": 24, "sizeY": 8, "row": 0, "col": 0},
+                            "w_chart_temps": {"sizeX": 12, "sizeY": 8, "row": 8, "col": 0},
+                            "w_chart_filter": {"sizeX": 12, "sizeY": 8, "row": 8, "col": 12},
+                            "w_chart_fans": {"sizeX": 12, "sizeY": 8, "row": 16, "col": 0},
+                            "w_chart_energy": {"sizeX": 12, "sizeY": 8, "row": 16, "col": 12},
+                            "w_alarms_table": {"sizeX": 24, "sizeY": 8, "row": 24, "col": 0}
                         },
                         "gridSettings": {
                             "columns": 24,

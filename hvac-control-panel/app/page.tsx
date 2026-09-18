@@ -26,6 +26,9 @@ import {
   ChevronRight,
   AlertCircle,
   LogOut,
+  Zap,
+  Gauge,
+  Cpu,
 } from 'lucide-react';
 
 interface TelemetryData {
@@ -42,6 +45,12 @@ interface TelemetryData {
   heating_valve: number;
   cooling_valve: number;
   status: 'RUNNING' | 'STOPPED' | 'ALARM';
+  instant_power_kw?: number;
+  total_energy_kwh?: number;
+  cop_efficiency?: number;
+  filter_rul_hours?: number;
+  health_index?: number;
+  bearing_vibration?: number;
 }
 
 interface AlarmItem {
@@ -67,6 +76,12 @@ const DEFAULT_TELEMETRY: TelemetryData = {
   heating_valve: 22.0,
   cooling_valve: 0.0,
   status: 'RUNNING',
+  instant_power_kw: 3.42,
+  total_energy_kwh: 142.85,
+  cop_efficiency: 3.8,
+  filter_rul_hours: 320.0,
+  health_index: 98.5,
+  bearing_vibration: 1.25,
 };
 
 export default function HVACControlPanel() {
@@ -89,6 +104,8 @@ export default function HVACControlPanel() {
   const [authLoading, setAuthLoading] = useState<boolean>(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [rpcLoading, setRpcLoading] = useState<boolean>(false);
+  const [rpcLog, setRpcLog] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchTelemetry = async () => {
@@ -207,6 +224,60 @@ export default function HVACControlPanel() {
       setAuthError('Ошибка сети: Убедитесь, что ThingsBoard запущен на порту :9090');
     } finally {
       setAuthLoading(false);
+    }
+  };
+
+  const sendThingsBoardRPC = async (method: string, params: any) => {
+    setRpcLoading(true);
+    setRpcLog(`[RPC OUT] ${method}(${JSON.stringify(params)}) -> ThingsBoard :9090...`);
+    try {
+      let token = authToken;
+      if (!token) {
+        const loginRes = await fetch('http://localhost:9090/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: tbUsername, password: tbPassword }),
+        });
+        if (loginRes.ok) {
+          const authData = await loginRes.json();
+          token = authData.token;
+          setAuthToken(token);
+        }
+      }
+
+      if (!token) {
+        setRpcLog('[RPC ERR] Не удалось получить авторизационный токен ThingsBoard');
+        setRpcLoading(false);
+        return;
+      }
+
+      const devRes = await fetch('http://localhost:9090/api/tenant/devices?deviceName=HVAC-01', {
+        headers: { 'X-Authorization': `Bearer ${token}` }
+      });
+      const devData = await devRes.json();
+      const deviceId = devData?.id?.id;
+
+      if (!deviceId) {
+        setRpcLog('[RPC ERR] Устройство HVAC-01 не найдено в ThingsBoard');
+        setRpcLoading(false);
+        return;
+      }
+
+      const rpcRes = await fetch(`http://localhost:9090/api/plugins/rpc/twoway/${deviceId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ method, params, timeout: 5000 })
+      });
+
+      const rpcData = await rpcRes.json();
+      setRpcLog(`[RPC IN 200 OK] Ответ контроллера: ${JSON.stringify(rpcData, null, 2)}`);
+    } catch (err: any) {
+      setRpcLog(`[RPC ERR] Исключение: ${err?.message || err}`);
+    } finally {
+      setRpcLoading(false);
     }
   };
 
@@ -475,6 +546,72 @@ export default function HVACControlPanel() {
             </div>
           </div>
 
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+            <div className="shadcn-card" style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>Мощность вентиляторов P</span>
+                <Zap size={16} color="#ffffff" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                <span className="mono" style={{ fontSize: '26px', fontWeight: 800, color: '#ffffff' }}>
+                  {(telemetry.instant_power_kw ?? 0).toFixed(2)}
+                </span>
+                <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>кВт</span>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                Расход: <strong style={{ color: '#ffffff' }}>{(telemetry.total_energy_kwh ?? 0).toFixed(2)} кВт·ч</strong>
+              </div>
+            </div>
+
+            <div className="shadcn-card" style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>Энергоэффективность COP</span>
+                <Gauge size={16} color="#ffffff" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                <span className="mono" style={{ fontSize: '26px', fontWeight: 800, color: '#ffffff' }}>
+                  {(telemetry.cop_efficiency ?? 0).toFixed(1)}
+                </span>
+                <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>к.п.д.</span>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                Класс: <strong style={{ color: '#ffffff' }}>{(telemetry.cop_efficiency ?? 0) >= 3.0 ? 'A++ High Eco' : 'A Normal'}</strong>
+              </div>
+            </div>
+
+            <div className="shadcn-card" style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>Ресурс фильтра RUL</span>
+                <Cpu size={16} color="#ffffff" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                <span className="mono" style={{ fontSize: '26px', fontWeight: 800, color: (telemetry.filter_rul_hours ?? 0) < 48 ? '#ef4444' : '#ffffff' }}>
+                  {(telemetry.filter_rul_hours ?? 0).toFixed(0)}
+                </span>
+                <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>часов</span>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                Прогноз: <strong style={{ color: '#ffffff' }}>{(telemetry.filter_rul_hours ?? 0) > 72 ? 'Штатный ресурс' : 'Скорая замена'}</strong>
+              </div>
+            </div>
+
+            <div className="shadcn-card" style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>Индекс здоровья (Health)</span>
+                <Activity size={16} color="#ffffff" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                <span className="mono" style={{ fontSize: '26px', fontWeight: 800, color: (telemetry.health_index ?? 0) < 70 ? '#ef4444' : '#ffffff' }}>
+                  {(telemetry.health_index ?? 0).toFixed(0)}
+                </span>
+                <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>%</span>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                Вибрация: <strong style={{ color: '#ffffff' }}>{(telemetry.bearing_vibration ?? 0).toFixed(2)} мм/с (ISO 10816)</strong>
+              </div>
+            </div>
+          </div>
+
           <div className="shadcn-card" style={{ padding: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
@@ -629,6 +766,72 @@ export default function HVACControlPanel() {
                 </div>
               </div>
             </div>
+          </div>
+
+          <div className="shadcn-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+              <div>
+                <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff' }}>Двусторонний Digital Twin RPC (ThingsBoard → MQTT → Контроллер)</h2>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  Управление контроллером через шину RPC ThingsBoard по протоколу MQTT (<code className="mono">v1/devices/me/rpc/request/+</code>)
+                </p>
+              </div>
+              <span className="badge badge-outline mono">QoS 1 Server-Side RPC</span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '10px', marginTop: '16px' }}>
+              <button
+                onClick={() => sendThingsBoardRPC('setTargetTemperature', targetInput)}
+                disabled={rpcLoading}
+                className="btn btn-outline"
+                style={{ justifyContent: 'center' }}
+              >
+                RPC: Задать T={targetInput.toFixed(1)}°C
+              </button>
+              <button
+                onClick={() => sendThingsBoardRPC('setPower', !isRunning)}
+                disabled={rpcLoading}
+                className="btn btn-outline"
+                style={{ justifyContent: 'center' }}
+              >
+                RPC: {isRunning ? 'Останов (Power Off)' : 'Пуск (Power On)'}
+              </button>
+              <button
+                onClick={() => sendThingsBoardRPC('resetFilter', {})}
+                disabled={rpcLoading}
+                className="btn btn-outline"
+                style={{ justifyContent: 'center' }}
+              >
+                RPC: Сброс фильтра F7
+              </button>
+              <button
+                onClick={() => sendThingsBoardRPC('setMode', 'SUMMER')}
+                disabled={rpcLoading}
+                className="btn btn-outline"
+                style={{ justifyContent: 'center' }}
+              >
+                RPC: Режим ЛЕТО
+              </button>
+              <button
+                onClick={() => sendThingsBoardRPC('setMode', 'WINTER')}
+                disabled={rpcLoading}
+                className="btn btn-outline"
+                style={{ justifyContent: 'center' }}
+              >
+                RPC: Режим ЗИМА
+              </button>
+            </div>
+
+            {rpcLog && (
+              <div style={{ marginTop: '16px', padding: '12px 14px', background: '#09090b', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-medium)' }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', fontWeight: 600 }}>
+                  Терминал ThingsBoard RPC
+                </div>
+                <pre className="mono" style={{ fontSize: '12px', color: rpcLog.includes('ERR') ? '#ef4444' : '#ffffff', margin: 0, whiteSpace: 'pre-wrap' }}>
+                  {rpcLog}
+                </pre>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -1,12 +1,9 @@
-"""Device metadata and client-side attributes."""
-
 from typing import Any, Dict
 from dataclasses import dataclass, asdict
 
 
 @dataclass(frozen=True)
 class DeviceMetadata:
-    """Device client attributes for ThingsBoard."""
     manufacturer: str = "ORIONMETER"
     model: str = "HVAC-VENT-001"
     serial_number: str = "ONM-2026-HVAC-01"
