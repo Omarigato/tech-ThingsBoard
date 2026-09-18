@@ -21,7 +21,7 @@ services:
       - tb-network
 
   thingsboard:
-    image: ${TB_IMAGE:-dockerhub.timeweb.cloud/thingsboard/tb-postgres:3.7.0}
+    image: ${TB_IMAGE:-thingsboard/tb-postgres:latest}
     container_name: thingsboard-ce
     restart: unless-stopped
     depends_on:

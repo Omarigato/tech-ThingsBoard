@@ -1,391 +1,207 @@
-# Промышленная IoT-платформа мониторинга и предиктивной аналитики ПВУ (ThingsBoard CE)
+# Мониторинг приточно-вытяжной установки (HVAC) в ThingsBoard CE
 
-[![ThingsBoard](https://img.shields.io/badge/ThingsBoard-4.2.1%20CE-blue.svg)](https://thingsboard.io/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
-[![MQTT](https://img.shields.io/badge/MQTT-Paho%20v2-660066.svg?logo=eclipse-mosquitto)](https://mqtt.org/)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Next.js](https://img.shields.io/badge/Next.js-14%20(TS)-black.svg?logo=next.js)](https://nextjs.org/)
-[![UI](https://img.shields.io/badge/Design-Shadcn%20Monochrome-white.svg)](https://ui.shadcn.com/)
+Проект сделан в рамках тестового задания на позицию **Инженер IoT-платформы ThingsBoard (Dashboard-as-Code)**.
 
-Production-grade демонстрация инженерного стека IoT-платформы промышленной автоматизации (BMS/HVAC/SCADA) на базе **ThingsBoard Community Edition v4.2.1**, реляционного хранилища **PostgreSQL 16**, физико-математического симулятора оборудования на **Python 3.11** и операторской веб-панели управления на **Next.js 14 / TypeScript**.
+Здесь собран полный цикл работы IoT-устройства: эмулятор вентиляционной установки (ПВУ) на Python генерирует физически правдоподобную телеметрию, шлет её по MQTT в локальный ThingsBoard CE, где данные обрабатываются правилами Rule Engine, складываются в PostgreSQL и отображаются на интерактивном дашборде. Также настроено двустороннее управление (RPC) обратно на устройство.
 
 ---
 
-## Архитектура решения
+## Архитектура проекта
 
-Решение построено по принципам **Clean Architecture** и стандартам промышленных систем диспетчеризации (BMS/SCADA) с четким разделением уровней сбора, обработки, хранения и визуализации данных.
-
-### 1. Схема взаимодействия компонентов
+Схема движения данных предельно простая и стандартная для IoT:
 
 ```mermaid
-flowchart TD
-    classDef edge fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff;
-    classDef broker fill:#0f172a,stroke:#10b981,stroke-width:2px,color:#fff;
-    classDef rules fill:#1c1917,stroke:#f59e0b,stroke-width:2px,color:#fff;
-    classDef ui fill:#09090b,stroke:#e2e8f0,stroke-width:2px,color:#fff;
-
-    subgraph L1[" Уровень 1: Edge & Физический симулятор (Python 3.11) "]
-        PHYS["Физические модули (ODE)
-        • Тепловая инерция приточного воздуха
-        • Аэродинамика центробежных вентиляторов
-        • Квадратичный перепад давления фильтра F7"]
-        CTRL["Контроллер установки ПВУ
-        (Конечный автомат: RUNNING / STOPPED / ALARM)"]
-        PUB["Диспетчер телеметрии
-        (Paho MQTT v2 клиент + Reconnect Backoff)"]
-        
-        PHYS --> CTRL --> PUB
-    end
-
-    subgraph L2[" Уровень 2: Брокер сообщений и персистентность (Docker) "]
-        MQTT_BROKER["ThingsBoard MQTT Broker
-        (TCP порт 1883)"]
-        TB_CORE["ThingsBoard Core Platform v4.2.1
-        (HTTP порт 9090)"]
-        POSTGRES[("PostgreSQL 16
-        (Таблицы ts_kv и entities)")]
-
-        MQTT_BROKER --> TB_CORE <--> POSTGRES
-    end
-
-    subgraph L3[" Уровень 3: Аналитика и логика аварий (Rule Engine) "]
-        RC["Цепочка правил: HVAC-01"]
-        A1["FILTER_DIRTY (Warning)
-        ΔP > 250 Па"]
-        A2["TEMPERATURE_DEVIATION (Major)
-        |T_приток - T_уставка| > 5.0 °C"]
-        A3["DEVICE_FAILURE (Critical)
-        Отказ привода / Срыв оборотов"]
-
-        RC --> A1
-        RC --> A2
-        RC --> A3
-    end
-
-    subgraph L4[" Уровень 4: Операторские интерфейсы "]
-        TB_DASH["Дашборд ThingsBoard 4.2
-        (http://localhost:9090)
-        • Сводная таблица телеметрии
-        • Временные ряды трендов
-        • Реестр аварийных событий"]
-        NEXT_SCADA["Панель оператора SCADA Next.js 14
-        (http://localhost:3000)
-        • Интерактивная мнемосхема ПВУ
-        • Выбор климатических сценариев
-        • Быстрое управление и экспорт в CSV"]
-    end
-
-    PUB -->|"MQTT топик: v1/devices/me/telemetry (QoS 1)"| MQTT_BROKER
-    TB_CORE --> RC
-    TB_CORE --> TB_DASH
-    CTRL -.->|"REST API :8080 (/health, /control)"| NEXT_SCADA
-
-    class L1 edge;
-    class L2 broker;
-    class L3 rules;
-    class L4 ui;
+flowchart LR
+    Sim[HVAC Эмулятор<br/>Python 3.11] -->|MQTT: telemetry<br/>QoS 1| TB[ThingsBoard CE<br/>Docker :9090 / :1883]
+    TB -->|SQL| PG[(PostgreSQL 16<br/>Volume: data)]
+    TB -->|Events| RE[Rule Engine<br/>Hysteresis Alarms]
+    TB -->|WebSocket| Dash[ThingsBoard<br/>Dashboard]
+    TB -.->|Two-Way RPC<br/>MQTT request/+| Sim
+    Sim -.->|HTTP :8080| Panel[Операторский пульт<br/>Next.js 14]
 ```
 
----
-
-### 2. Сводная таблица архитектурных слоев
-
-| Уровень | Компонент | Назначение | Протоколы и Стек |
-| :--- | :--- | :--- | :--- |
-| **01. Edge / Моделирование** | `hvac-simulator` | Расчет физических процессов, теплообмена и аэродинамики в реальном времени. | Python 3.11, Pydantic, ODE |
-| **02. Предиктивная аналитика** | `PredictiveAnalytics` | Оценка остаточного ресурса RUL, диагностика вибрации по ISO 10816 и Health Index. | Python 3.11, Скользящее окно, dP/dt |
-| **03. Энергоэффективность** | `EnergySubsystem` | Кубический закон мощности вентиляторов, счетчик кВт·ч, расчет COP. | Термодинамика воздуха, P ~ N³ |
-| **04. Транспорт телеметрии** | `ThingsBoardMQTTClient` | Отказоустойчивая доставка телеметрии и атрибутов с экспоненциальным авто-реконнектом. | MQTT v3.1.1 (Paho v2), TCP 1883 |
-| **05. Двусторонний RPC** | `Digital Twin Control` | Двустороннее дистанционное управление через брокер ThingsBoard (QoS 1). | MQTT `v1/devices/me/rpc/request/+` |
-| **06. Брокер и Core** | `thingsboard-ce` | Маршрутизация пакетов, авторизация по токенам, управление цифровыми двойниками. | ThingsBoard 4.2.1 Community Edition |
-| **07. База данных** | `tb-postgres` | Хранение временных рядов телеметрии (`ts_kv`), атрибутов сущностей и журнала событий. | PostgreSQL 16 (Alpine), Docker Volume |
-| **08. Обработка событий** | `hvac_rule_chain` | Пороговый анализ параметров, регистрация аварий и автоматическое квитирование. | ThingsBoard Rule Engine |
-| **09. SCADA / Диспетчеризация** | `hvac-control-panel` | Автономный веб-пульт оператора с мнемосхемой, климат-профилями, трендами и RPC. | Next.js 14, React 18, TypeScript, Shadcn UI |
+1. **Эмулятор оборудования (`hvac-simulator`):** крутится в фоне, каждые 5 секунд считает физику воздуха, вентиляторов и фильтра, отправляет телеметрию в топик `v1/devices/me/telemetry` и слушает команды управления.
+2. **ThingsBoard CE + PostgreSQL (`docker-compose.yml`):** принимает данные по MQTT, хранит историю в базе с сохранением данных на диске, проверяет аварии.
+3. **Цепочка правил (`hvac_rule_chain.json`):** следит за перепадом давления на фильтре и отклонением температуры, автоматически создавая и закрывая аварии.
+4. **Дашборд (`hvac_dashboard.json`):** выводит текущее состояние, графики истории и таблицу тревог.
+5. **Скрипт автоматизации (`provision_thingsboard.py`):** сам создает устройство, токены, импортирует правила и дашборд через REST API без ручных кликов в браузере.
 
 ---
 
-### 3. Технологический тракт воздуха (Мнемосхема ПВУ)
+## Что я реализовал
 
-Воздушный поток моделируется последовательно через 5 технологических узлов:
-
-```
- Наружный      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐     Приточный
-  воздух   ──► │ 01. Заслонка │  ──► │ 02. Фильтр   │  ──► │ 03. Водяной  │  ──► │ 04. Водяной  │  ──► │ 05. Вентилятор│ ──►  канал
- (T_outdoor)   │   (0 - 100%) │      │  F7 (ΔP, Па) │      │  охладитель  │      │  калорифер   │      │  (ЧРП, об/м) │    (T_supply)
-               └──────────────┘      └──────────────┘      └──────────────┘      └──────────────┘      └──────────────┘
-```
-
----
-
-## Ключевые компоненты
-
-### 1. Физико-математическая модель оборудования (ПВУ)
-В отличие от тривиальных рандомайзеров, симулятор моделирует реальные физические процессы вентиляционной установки:
-* **Тепловая инерция (ODE):** температура приточного воздуха сходится к уставке с учетом теплоемкости системы и теплопотерь в воздуховоде:
-  $$\frac{dT_{supply}}{dt} = \frac{1}{\tau} \cdot (T_{target} - T_{supply}) + \kappa \cdot (T_{outdoor} - T_{supply}) + \xi(t)$$
-  где $\tau$ — постоянная тепловой инерции, $\kappa$ — коэффициент теплопередачи через корпус, $\xi(t) \sim \mathcal{N}(0, \sigma^2)$ — высокочастотный сенсорный шум.
-* **Аэродинамика и ЧРП:** разгон приточного и вытяжного центробежных вентиляторов по S-образной кривой частотного привода (до 1450 об/мин). Для поддержания положительного подпора воздуха в чистых помещениях вытяжной вентилятор балансируется с дифференциалом $-4\%$.
-* **Квадратичный перепад давления ($\Delta P$):** падение давления на карманном фильтре тонкой очистки F7 рассчитывается по аэродинамическому закону:
-  $$\Delta P = \Delta P_{clean} \cdot \left(\frac{N}{N_{nom}}\right)^2 \cdot \left(1 + 2.4 \cdot \left(\frac{D}{100}\right)^{1.3}\right)$$
-  где $D$ — процент запыленности фильтра, $N$ — текущие обороты крыльчатки.
-
-### 2. Энергетическая модель и учет OPEX
-* **Кубический закон мощности вентиляторов:** электрическая мощность центробежных нагнетателей пропорциональна кубу частоты вращения:
-  $$P_{fans} = 2.2 \cdot \left(\frac{N_{supply}}{N_{nom}}\right)^3 + 1.8 \cdot \left(\frac{N_{exhaust}}{N_{nom}}\right)^3 + P_{aux}$$
-* **Интегратор суммарной энергии:** непрерывный расчет накопленного потребления в кВт·ч:
-  $$E(t) = \int_{0}^t P(\tau) \, d\tau$$
-* **Коэффициент производительности (COP):** оценка термической эффективности теплообменных аппаратов:
-  $$COP = \frac{\dot{m} \cdot c_p \cdot |T_{supply} - T_{outdoor}|}{P_{electric}}$$
-
-### 3. Предиктивная аналитика технического состояния (Edge AI / RUL)
-* **Прогноз остаточного ресурса фильтра (RUL, ч):** расчет времени до достижения критического перепада ($\Delta P_{limit} = 250\text{ Па}$) по скользящей производной градиента запыления:
-  $$RUL = \frac{\Delta P_{limit} - \Delta P(t)}{\frac{d\Delta P}{dt}}$$
-* **Индекс исправности (Health Index 0–100%):** интегральная оценка надежности установки со штрафными коэффициентами за перегрузку фильтра, термические рассогласования и механическую нестабильность.
-* **Вибромониторинг по стандарту ISO 10816-3:** контроль среднеквадратичной виброскорости подшипниковых узлов нагнетателей (мм/с RMS).
-
-### 4. Двусторонний цифровой двойник (ThingsBoard Server-Side RPC)
-Полная поддержка протокола двустороннего управления по MQTT через топики `v1/devices/me/rpc/request/+` и `v1/devices/me/rpc/response/+`:
-* `setTargetTemperature(float)` — установка целевой температуры приточного воздуха.
-* `setPower(bool)` — дистанционный пуск и останов установки.
-* `setMode(str)` — смена сезонных и тестовых сценариев (`NORMAL`, `SUMMER`, `WINTER`, `FAILURE_TEST`).
-* `resetFilter()` — сброс счетчика ресурса фильтра F7 после регламентного сервисного обслуживания.
-
-### 5. Отказоустойчивая доставка телеметрии по MQTT
-* **Протокол:** MQTT v3.1.1 (библиотека `paho-mqtt` v2 API).
-* **Топик телеметрии:** `v1/devices/me/telemetry` (период публикации: 5 секунд, QoS 1).
-* **Топик атрибутов:** `v1/devices/me/attributes` (автоматическая отправка паспортных данных установки при установлении сессии).
-* **Отказоустойчивость:** экспоненциальный `reconnect backoff` (1–30 с) при временной недоступности брокера с буферизацией состояния.
-
-### 6. Цепочка правил ThingsBoard (Rule Chain Alarms)
-Автоматическое формирование, обновление и квитирование аварийных событий в ThingsBoard Rule Engine:
-
-| Тип аварии | Уровень | Условие срабатывания | Условие снятия (Hysteresis) |
-| :--- | :---: | :--- | :--- |
-| `FILTER_DIRTY` | **WARNING** | Перепад давления $\Delta P > 250\text{ Па}$ | $\Delta P \le 200\text{ Па}$ после замены фильтра |
-| `TEMPERATURE_DEVIATION` | **MAJOR** | $\|T_{приток} - T_{уставка}\| > 5.0^\circ\text{C}$ при работающих вентиляторах | Отклонение $\le 2.5^\circ\text{C}$ (возврат в диапазон) |
-| `DEVICE_FAILURE` | **CRITICAL** | Статус `STOPPED` или срыв оборотов вентилятора ($< 100\text{ об/мин}$) в режиме пуска | Восстановление штатных оборотов $> 400\text{ об/мин}$ |
-
-### 7. Два операторских интерфейса
-
-#### А. Нативный дашборд ThingsBoard CE ([http://localhost:9090](http://localhost:9090/dashboards/c33695a0-b29d-11f1-87e7-fbe1daa32f18))
-* Построен на виджетах стандарта ThingsBoard 4.x (`system.cards.entities_table`, `system.time_series_chart`, `system.alarm_widgets.alarms_table`).
-* Полная локализация на русский язык.
-* 6 аналитических зон: сводная таблица оборудования с энергопотреблением и RUL, тренды температур, перепад на фильтре, аэродинамика вентиляторов, график энергоэффективности и реестр аварий.
-
-#### Б. Веб-панель управления Next.js 14 ([http://localhost:3000](http://localhost:3000))
-* Современный монохромный SCADA-интерфейс на базе **Shadcn UI** и **Lucide Icons**.
-* Интерактивная технологическая мнемосхема ПВУ с отображением текущих положений заслонок, тепловых клапанов и анимацией вентиляторов.
-* Виджеты оперативного контроля: мощность (кВт), суммарный расход (кВт·ч), коэффициент COP, остаточный ресурс RUL фильтра, индекс здоровья (Health Index) и вибродиагностика.
-* Консоль ThingsBoard RPC для прямой отправки управляющих команд в цифровой двойник через шину ThingsBoard.
-* Климатические профили для тестирования: **Штатный**, **Лето (Жара)**, **Зима (Мороз)**, **Тест аварии**.
-* Живой инспектор пакетов MQTT, экспорт истории телеметрии в CSV в 1 клик.
+- **Docker-окружение:** поднял ThingsBoard CE 4.x в связке с PostgreSQL 16 через `docker-compose`. Данные БД вынесены в named volume `tb-postgres-data`, настроен healthcheck на готовность базы и restart policy `unless-stopped`.
+- **Эмулятор ПВУ с физической моделью:**
+  - Температура притока плавно сходится к уставке с учетом тепловой инерции воздуховода и уличной температуры, а не скачет случайными числами.
+  - Обороты вентиляторов разгоняются по плавной кривой (до 1450 об/мин), вытяжка балансируется с небольшим дифференциалом для поддержания подпора воздуха.
+  - Мощность вентиляторов рассчитывается по кубическому закону от скорости ($P \propto N^3$), считается суммарный расход в кВт·ч и тепловой коэффициент COP.
+  - Фильтр F7 постепенно забивается от прокачанного объема воздуха: растет перепад давления $\Delta P$ и считается расчетный остаточный ресурс до замены (RUL).
+- **Двустороннее управление (Two-Way RPC):**
+  - Поддержал топики `v1/devices/me/rpc/request/+` и ответы в `v1/devices/me/rpc/response/+`.
+  - С дашборда или через API можно на лету менять уставку температуры (`setTargetTemperature`), останавливать/запускать установку (`setPower`), переключать режимы (`setMode`) и сбрасывать счетчик после замены фильтра (`resetFilter`).
+- **Обработка аварий в Rule Engine:**
+  - Настроил полноценный гистерезис: авария фильтра загорается при перепаде $> 250\text{ Па}$, а снимается только при опускании ниже $200\text{ Па}$. Это убирает дребезг тревог на границе порога.
+  - Авария отклонения температуры срабатывает при рассогласовании $> 5^\circ\text{C}$ и снимается при возврате в окно $2.5^\circ\text{C}$.
+- **Dashboard-as-Code:** написал скрипт инициализации на Python, который через REST API платформы полностью настраивает стенд «с нуля» за одну команду.
+- **Операторский веб-пульт:** дополнительно собрал легковесную панель на Next.js с интерактивной мнемосхемой установки, ручным управлением уставками и прямым вызовом RPC.
 
 ---
 
-## Структура репозитория
+## Скриншоты
 
-```
-tech-ThingsBoard/
-├── .env                              # Активные переменные окружения
-├── .env.example                      # Шаблон переменных окружения
-├── .gitignore                        # Git-исключения (Python, Node, Docker, IDE)
-├── docker-compose.yml                # Сервисы: postgres:16, thingsboard:latest
-├── README.md                         # Документация проекта
-├── hvac-simulator/                   # Python физический симулятор оборудования
-│   ├── Dockerfile                    # Multi-stage Dockerfile симулятора
-│   ├── requirements.txt              # Зависимости (paho-mqtt, pydantic-settings)
-│   └── src/
-│       ├── main.py                   # Точка входа, оркестрация жизненного цикла
-│       ├── config.py                 # Pydantic Settings конфигурация
-│       ├── server.py                 # HTTP сервер (/health, /telemetry, /control)
-│       ├── models/                   # DTO и типизация (state, telemetry, device_info)
-│       ├── simulator/                # Физические модули (hvac, temperature, fan, filter, alarms)
-│       └── thingsboard/              # Клиент MQTT и диспетчер телеметрии
-├── thingsboard/
-│   ├── rule_chains/
-│   │   └── hvac_rule_chain.json      # Цепочка правил с аварийными триггерами (UTF-8)
-│   └── dashboards/
-│       └── hvac_dashboard.json       # Конфигурация дашборда ThingsBoard 4.x (UTF-8)
-├── scripts/
-│   ├── provision_thingsboard.py      # Автоматический скрипт инициализации сущностей через REST API
-│   └── rebuild_dashboard.py          # Скрипт сборки и обновления дашборда
-└── hvac-control-panel/               # Панель оператора Next.js 14 / TypeScript / Shadcn
-    ├── package.json
-    ├── app/
-    │   ├── page.tsx                  # Главный SCADA интерфейс на русском языке
-    │   ├── layout.tsx                # Корневой layout и метаданные
-    │   └── globals.css               # Монохромная тема и анимации
-    └── tsconfig.json
-```
+### 1. Основной дашборд ThingsBoard
+Сводная таблица параметров установки: текущие статусы, температуры, обороты вентиляторов, перепад на фильтре и энергопотребление.
+
+![ThingsBoard Dashboard](screenshots/thingsboard-dashboard.png)
 
 ---
 
-## Быстрый старт (Quickstart)
+### 2. Графики телеметрии и история параметров
+Динамика температур (приток, уставка, улица), рост перепада давления на фильтре и работа регулирующих клапанов во времени.
 
-### Требования
-* ОС: Windows / Linux / macOS
-* Docker Desktop (с поддержкой Compose v2)
-* Python 3.10+
-* Node.js 18+ и npm
+![Telemetry History](screenshots/telemetry-history.png)
 
 ---
 
-### Шаг 1. Клонирование и переменные окружения
+### 3. Обработка аварий в Rule Engine
+Срабатывание тревоги `FILTER_DIRTY` при превышении порога в 250 Па с отображением деталей аварии и времени фиксации.
+
+![Alarm Filter](screenshots/alarm-filter.png)
+
+---
+
+### 4. Операторский пульт и мнемосхема
+Мнемосхема технологического тракта воздуха (заслонка $\rightarrow$ фильтр $\rightarrow$ теплообменники $\rightarrow$ вентиляторы) и кнопки вызова RPC-команд.
+
+![Control Panel](screenshots/control-panel.png)
+
+---
+
+## Технический стек
+
+- **IoT-платформа:** ThingsBoard Community Edition 4.x
+- **База данных:** PostgreSQL 16 (Alpine)
+- **Эмулятор:** Python 3.11, `paho-mqtt` v2, `pydantic-settings`, `requests`
+- **Инфраструктура:** Docker Compose v2
+- **Интерфейс оператора:** Next.js 14, React 18, TypeScript, Tailwind CSS
+
+---
+
+## Быстрый запуск
+
+### 1. Клонирование и переменные окружения
 ```bash
+git clone https://github.com/Omarigato/tech-ThingsBoard.git
+cd tech-ThingsBoard
 cp .env.example .env
 ```
 
-Параметры по умолчанию в `.env`:
-* ThingsBoard Web UI: `http://localhost:9090`
-* ThingsBoard MQTT Broker: `localhost:1883`
-* Учетная запись: `tenant@thingsboard.org` / `tenant`
-* Токен доступа оборудования: `HVAC_VENT_SECRET_TOKEN`
-* HTTP API симулятора: `http://localhost:8080`
-* Порт панели оператора: `http://localhost:3000`
-
----
-
-### Шаг 2. Запуск инфраструктуры (Docker)
+### 2. Запуск контейнеров ThingsBoard и PostgreSQL
 ```bash
 docker compose up -d
 ```
-Запускаются контейнеры:
-* `tb-postgres` (`postgres:16-alpine`) — СУБД с сохранением данных в volume `tb-postgres-data`.
-* `thingsboard-ce` (`thingsboard/tb-postgres:latest`) — ядро ThingsBoard и брокер MQTT.
-
-> **Важно:** При первом запуске ThingsBoard выполняет миграции схемы базы данных (около 35–45 секунд).  
-> Проверить готовность можно командой:
+> **Важно:** При первом старте ThingsBoard накатывает начальные схемы в базу данных. Это занимает около 30–45 секунд. Проверить готовность можно логом:
 > ```bash
 > docker compose logs -f thingsboard
 > ```
-> Когда появится строка `ThingsBoard started in ... ms`, система готова к работе.
+> Дождитесь строки `ThingsBoard started in ... ms`.
 
----
-
-### Шаг 3. Автоматическая настройка (Provisioning в 1 команду)
-Запустите скрипт автоматической настройки через REST API ThingsBoard:
+### 3. Автоматическая настройка платформы (Provisioning)
+Скрипт создаст устройство `HVAC-01`, токен доступа, цепочку правил и дашборд:
 ```bash
 python scripts/provision_thingsboard.py
 ```
-Скрипт автоматически:
-1. Авторизуется под администратором тенанта (`tenant@thingsboard.org`).
-2. Создает устройство **HVAC-01** и привязывает access token `HVAC_VENT_SECRET_TOKEN`.
-3. Записывает паспорта и серверные метаданные оборудования (`ORIONMETER`, `HVAC-VENT-001`).
-4. Импортирует и компилирует цепочку правил **«HVAC-01: Мониторинг и аварии (ПВУ)»**.
-5. Импортирует и публикует дашборд **«Промышленный мониторинг ПВУ (HVAC)»**.
 
----
-
-### Шаг 4. Запуск симулятора оборудования
-Симулятор запускается локально или через Docker:
-
-**Вариант A (Локально через Python):**
+### 4. Запуск эмулятора оборудования
 ```bash
 pip install -r hvac-simulator/requirements.txt
 python hvac-simulator/src/main.py
 ```
-
-**Вариант B (Через Docker):**
-```bash
-docker compose --profile simulator up -d hvac-simulator
+Эмулятор подключится к брокеру `localhost:1883` и начнет отдавать пакеты:
+```
+[OK] SENT | State=RUNNING | T_sup= 21.5 C (T_tgt=21.5 C, T_out= 15.0 C) | Fans=1240/1180 RPM | Filter= 96.5 Pa (25.5%) | P=2.48kW (COP=2.6) | Health=100.0%
 ```
 
-После запуска в консоли каждые 5 секунд логируются отправленные в MQTT пакеты:
-```
-[OK] SENT | State=RUNNING | T_sup= 21.4 C (T_tgt=21.5 C, T_out= 15.0 C) | Fans=1235/1182 RPM | Filter= 76.1 Pa ( 9.0%) | Valves(H/C)=20.0%/ 0.0%
-```
+### 5. Просмотр результатов
+- **Дашборд ThingsBoard:** [http://localhost:9090](http://localhost:9090)  
+  *(Логин: `tenant@thingsboard.org`, Пароль: `tenant`)*
+- **Операторский пульт (опционально):** [http://localhost:3000](http://localhost:3000)  
+  *(Запуск: `cd hvac-control-panel && npm install && npm start`)*
 
 ---
 
-### Шаг 5. Запуск операторской веб-панели (Next.js)
-В отдельном окне терминала:
-```bash
-cd hvac-control-panel
-npm install
-npm start
-```
-*(или `npm run dev` для режима разработки)*.
+## Формат телеметрии по MQTT
 
-Откройте в браузере: **[http://localhost:3000](http://localhost:3000)**.
+Телеметрия публикуется в топик `v1/devices/me/telemetry` каждые 5 секунд с QoS 1:
 
----
-
-## Спецификация телеметрии и API
-
-### 1. Формат телеметрии (MQTT топик `v1/devices/me/telemetry`)
 ```json
 {
-  "timestamp": 1789653612506,
-  "supply_temperature": 21.1,
-  "outdoor_temperature": 15.0,
+  "timestamp": 1789705315394,
+  "supply_temperature": 21.5,
+  "outdoor_temperature": 15.2,
   "target_temperature": 21.5,
-  "humidity": 43.8,
-  "supply_fan_rpm": 1235,
-  "exhaust_fan_rpm": 1182,
-  "filter_pressure": 76.1,
-  "filter_dirty_percent": 9.0,
-  "damper_position": 76.0,
-  "heating_valve": 20.0,
+  "humidity": 50.2,
+  "supply_fan_rpm": 1242,
+  "exhaust_fan_rpm": 1174,
+  "filter_pressure": 96.7,
+  "filter_dirty_percent": 25.9,
+  "damper_position": 79.0,
+  "heating_valve": 15.7,
   "cooling_valve": 0.0,
   "status": "RUNNING",
-  "instant_power_kw": 3.42,
-  "total_energy_kwh": 142.85,
-  "cop_efficiency": 3.8,
-  "filter_rul_hours": 320.0,
-  "health_index": 98.5,
-  "bearing_vibration": 1.25
+  "instant_power_kw": 2.49,
+  "total_energy_kwh": 143.04,
+  "cop_efficiency": 2.56,
+  "filter_rul_hours": 425.8,
+  "health_index": 100.0,
+  "bearing_vibration": 1.42
 }
 ```
 
-### 2. Серверные и клиентские атрибуты (`v1/devices/me/attributes`)
+Статические паспорта установки отправляются один раз при подключении в топик `v1/devices/me/attributes`:
 ```json
 {
   "manufacturer": "ORIONMETER",
   "model": "HVAC-VENT-001",
+  "serial_number": "ONM-2026-HVAC-01",
   "rated_airflow_m3h": 3500,
-  "location": "Main Facility - Building A, Roof",
-  "firmware_version": "1.2.0-prod"
+  "filter_type": "Pocket Filter F7 (ePM1 70%)",
+  "firmware_version": "v1.2.0-prod"
 }
 ```
 
-### 3. Встроенный REST API симулятора (`http://localhost:8080`)
-* `GET /health` — статус работы сервиса и подключение к MQTT:
-  ```json
-  {
-    "status": "UP",
-    "mqtt_connected": true,
-    "hvac_status": "RUNNING",
-    "mode": "NORMAL",
-    "running": true
-  }
-  ```
-* `GET /telemetry` — моментальный снимок последних физических параметров.
-* `POST /control` — удаленная диспетчеризация симулятора:
+---
+
+## Технические решения (Technical decisions)
+
+- **Почему MQTT, а не HTTP?**  
+  Для постоянного потока телеметрии HTTP неэффективен: на каждые 100 байт данных приходится 500+ байт заголовков и накладные расходы на TCP handshake. MQTT держит постоянное легкое соединение, шлет минимальный заголовок (2 байта) и поддерживает постоянный канал для двустороннего RPC управления без белого IP на контроллере.
+- **Почему простая физическая модель вместо `random.uniform()`?**  
+  Случайные скачки ломают саму идею мониторинга. Реальный воздух прогревается постепенно из-за теплоемкости, вентилятор разгоняется плавно, а фильтр засоряется пропорционально расходу воздуха. Модель на базовых дифференциальных уравнениях позволяет проверять реакцию регуляторов и цепочек правил в реальных условиях.
+- **Зачем нужен гистерезис для аварий?**  
+  Если давление колеблется около границы 250 Па (например, 249–251 Па), без гистерезиса система будет открывать и закрывать по 20 аварий в минуту (*Alarm Flapping*). Гистерезис (включение $> 250\text{ Па}$, отключение $\le 200\text{ Па}$) защищает журнал оператора от мусора.
+- **Почему автоматизация через REST API (Dashboard-as-Code)?**  
+  В ThingsBoard дашборды жестко привязаны к внутренним UUID устройств. При ручном экспорте/импорте JSON на чистый инстанс дашборд теряет связь с сущностями. Скрипт `provision_thingsboard.py` динамически находит актуальный UUID по стабильному имени `HVAC-01` и связывает все виджеты автоматически.
+
+---
+
+## Что можно улучшить (Possible improvements)
+
+Если развивать проект дальше в сторону полноценного продакшна:
+1. **Безопасность устройств:** заменить простой статический токен на аутентификацию по X.509 клиентским сертификатам (mTLS).
+2. **Масштабирование хранилища:** для потока сотен устройств заменить PostgreSQL на TimescaleDB с автоматическим партиционированием по времени или Cassandra.
+3. **Очередь сообщений:** при росте нагрузки заменить встроенную `in-memory` очередь ThingsBoard на внешний кластер Apache Kafka.
+4. **Тестирование:** покрыть unit-тестами сходимость тепловой модели и обработку граничных значений в `pytest`.
+5. **CI/CD:** добавить GitHub Actions pipeline для проверки линтинга, типов (mypy) и автоматической сборки Docker-образов.
+
+---
+
+## Частые проблемы при запуске (Troubleshooting)
+
+- **`Connection refused` на порту 1883 или 9090:** ThingsBoard еще не закончил стартовую инициализацию базы данных. Проверьте лог: `docker compose logs -f thingsboard`.
+- **Заняты порты 5432 или 9090:** Если на машине уже крутится локальный Postgres, измените порт в `.env` (например, `POSTGRES_PORT=5433`).
+- **Сброс данных:** Чтобы полностью очистить стенд и пересоздать базу с нуля:
   ```bash
-  curl -X POST http://localhost:8080/control \
-    -H "Content-Type: application/json" \
-    -d '{"mode": "SUMMER", "target_temperature": 22.0}'
+  docker compose down -v
+  docker compose up -d
   ```
-
----
-
-## Сводная таблица учетных записей и портов
-
-| Сервис | Адрес | Логин / Токен | Пароль |
-| :--- | :--- | :--- | :--- |
-| **Панель оператора SCADA** | `http://localhost:3000` | — | — |
-| **ThingsBoard Web UI** | `http://localhost:9090` | `tenant@thingsboard.org` | `tenant` |
-| **ThingsBoard SysAdmin** | `http://localhost:9090` | `sysadmin@thingsboard.org` | `sysadmin` |
-| **MQTT Broker** | `localhost:1883` | Токен: `HVAC_VENT_SECRET_TOKEN` | — |
-| **PostgreSQL 16** | `localhost:5432` | `postgres` | `postgres` |
-| **HTTP API симулятора** | `http://localhost:8080` | — | — |
-
----
-
-## Инженерные решения и масштабируемость
-
-1. **Идемпотентность и автоматизация (IaC):** Все скрипты инициализации (`provision_thingsboard.py`, `rebuild_dashboard.py`) строго идемпотентны. Повторный запуск не создает дубликатов устройств, дашбордов или правил.
-2. **Персистентность данных:** База данных PostgreSQL и служебные логи хранятся в именованных томах Docker (`tb-postgres-data`, `tb-data`, `tb-logs`), что защищает историю телеметрии и дашбордов от потери при перезапуске контейнеров.
-3. **Совместимость с ThingsBoard 4.x:** Виджеты дашборда полностью соответствуют дескрипторам схем ThingsBoard 4.2.x с корректными FQN-типами, настройками таблиц и источников аварийных событий.
-4. **Чистый код:** Код проекта самодокументирован, разделен по слоям ответственности, избавлен от загромождающих комментариев и использует строгую статическую типизацию (Pydantic / TypeScript).
